@@ -1,9 +1,9 @@
 // simulate getting products from DataBase
 const products = [
-  { name: "Apples_:", country: "Italy", cost: 3, instock: 10 },
-  { name: "Oranges:", country: "Spain", cost: 4, instock: 3 },
-  { name: "Beans__:", country: "USA", cost: 2, instock: 5 },
-  { name: "Cabbage:", country: "USA", cost: 1, instock: 8 },
+  { id: "1", name: "Apples", country: "Italy", cost: 3, instock: 10 },
+  { id: "2", name: "Oranges", country: "Spain", cost: 4, instock: 3 },
+  { id: "3", name: "Beans", country: "USA", cost: 2, instock: 5 },
+  { id: "5", name: "Cabbage", country: "USA", cost: 1, instock: 8 },
 ];
 //=========Cart=============
 const Cart2 = (props) => {
@@ -16,13 +16,15 @@ const Cart2 = (props) => {
 
 const useDataApi = (initialUrl, initialData) => {
   const { useState, useEffect, useReducer } = React;
-  const [url, setUrl] = useState(initialUrl);
-
+  const [fetchCount, setFetchCount] = useState(0);
   const [state, dispatch] = useReducer(dataFetchReducer, {
     isLoading: false,
     isError: false,
     data: initialData,
   });
+  function doFetch() {
+    setFetchCount(fetchCount + 1);
+  }
   console.log(`useDataApi called`);
   useEffect(() => {
     console.log("useEffect Called");
@@ -30,10 +32,13 @@ const useDataApi = (initialUrl, initialData) => {
     const fetchData = async () => {
       dispatch({ type: "FETCH_INIT" });
       try {
-        const result = await axios(url);
+        const result = await axios(initialUrl);
         console.log("FETCH FROM URl");
         if (!didCancel) {
-          dispatch({ type: "FETCH_SUCCESS", payload: result.data });
+          dispatch({
+            type: "FETCH_SUCCESS",
+            payload: transformPayload(result.data, fetchCount),
+          });
         }
       } catch (error) {
         if (!didCancel) {
@@ -41,15 +46,20 @@ const useDataApi = (initialUrl, initialData) => {
         }
       }
     };
-    fetchData();
+    if (fetchCount) {
+      fetchData();
+    }
     return () => {
       didCancel = true;
     };
-  }, [url]);
-  return [state, setUrl];
+  }, [fetchCount]);
+  return [state, doFetch];
 };
-function transformPayload(payload) {
-  return payload.data.map((item) => ({ id: item.id, ...item.attributes }));
+function transformPayload(payload, fetchCount) {
+  return payload.data.map((item) => ({
+    id: `${fetchCount}_${item.id}`,
+    ...item.attributes,
+  }));
 }
 const dataFetchReducer = (state, action) => {
   switch (action.type) {
@@ -64,7 +74,7 @@ const dataFetchReducer = (state, action) => {
         ...state,
         isLoading: false,
         isError: false,
-        data: transformPayload(action.payload),
+        data: action.payload,
       };
     case "FETCH_FAILURE":
       return {
@@ -88,26 +98,36 @@ function Cart(props) {
   );
 }
 const Products = (props) => {
-  // const [items, setItems] = React.useState(products);
+  const [items, setItems] = React.useState(products);
   const [cart, setCart] = React.useState([]);
   const { Card, Accordion, Button, Container, Row, Col, Image, Input } =
     ReactBootstrap;
   //  Fetch Data
   const { Fragment, useState, useEffect, useReducer } = React;
-  const [query, setQuery] = useState("http://localhost:1337/api/products");
   const [{ data, isLoading, isError }, doFetch] = useDataApi(
     "http://localhost:1337/api/products",
-
     []
   );
   console.log(`Rendering Products ${JSON.stringify(data)}`);
+  useEffect(() => {
+    setItems([...items, ...data]);
+  }, [data]);
   // Fetch Data
   const addToCart = (e) => {
-    let name = e.target.name;
-    let item = data.filter((item) => item.name == name);
-    console.log(`add to Cart ${JSON.stringify(item)}`);
-    setCart([...cart, ...item]);
-    //doFetch(query);
+    const id = e.target.id;
+    const itemIndex = items.findIndex((item) => item.id === id);
+
+    // const newSelectedUser = { ...allUsers[selectedUserIndex] };
+    const item = { ...items[itemIndex] };
+    if (item) {
+      setCart([...cart, item]);
+      item.instock = item.instock - 1;
+      setItems([
+        ...items.slice(0, itemIndex),
+        item,
+        ...items.slice(itemIndex + 1),
+      ]);
+    }
   };
   const deleteCartItem = (index) => {
     let newCart = cart.filter((item, i) => index != i);
@@ -115,7 +135,7 @@ const Products = (props) => {
   };
   const photos = ["apple.png", "orange.png", "beans.png", "cabbage.png"];
 
-  let list = data.map((item, index) => {
+  let list = items.map((item, index) => {
     //let n = index + 1049;
     //let url = "https://picsum.photos/id/" + n + "/50/50";
 
@@ -123,9 +143,9 @@ const Products = (props) => {
       <li key={index}>
         <Image src={photos[index % 4]} width={70} roundedCircle></Image>
         <Button variant="primary" size="large">
-          {item.name}:{item.cost}
+          {item.name} stock:{item.instock} price:{item.cost}
         </Button>
-        <input name={item.name} type="submit" onClick={addToCart}></input>
+        <input id={item.id} type="submit" onClick={addToCart}></input>
       </li>
     );
   });
@@ -150,8 +170,11 @@ const Products = (props) => {
     return newTotal;
   };
   const total = getTotal();
-  // TODO: implement the restockProducts function
-  const restockProducts = (url) => {};
+
+  const restockProducts = (event) => {
+    doFetch();
+    event.preventDefault();
+  };
 
   return (
     <Container>
@@ -171,18 +194,7 @@ const Products = (props) => {
         </Col>
       </Row>
       <Row>
-        <form
-          onSubmit={(event) => {
-            restockProducts(`http://localhost:1337/${query}`);
-            console.log(`Restock called on ${query}`);
-            event.preventDefault();
-          }}
-        >
-          <input
-            type="text"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
+        <form onSubmit={restockProducts}>
           <button type="submit">ReStock Products</button>
         </form>
       </Row>
